@@ -1,0 +1,10 @@
+[project]
+name = "htb-blockchain-track"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "py-solc-x>=2.0.4",
+    "web3>=7.14.0",
+]
