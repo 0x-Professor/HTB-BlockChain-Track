@@ -1,4 +1,3 @@
-````markdown
 # Magic Vault — HackTheBox Blockchain Challenge Writeup
 
 **Challenge**: Magic Vault  
@@ -424,5 +423,3 @@ Magic Vault/
 ---
 
 *Everything is public on the blockchain!*
-
-````
